@@ -57,7 +57,33 @@ const StaticDevice STATIC_DEVICES[] = {
 };
 ```
 
+You can also supply a friendly name as a third field, which skips the `setup.xml` fetch and uses your label directly:
+
+```cpp
+const StaticDevice STATIC_DEVICES[] = {
+  { "192.168.1.42", 49153, "Living Room" },
+};
+```
+
 Leave the array empty to rely entirely on auto-discovery (the default).
+
+---
+
+## Sleep After Inactivity
+
+The device enters deep sleep automatically after a configurable period of inactivity to save battery. Press **Button A** to wake it. On wake, WiFi reconnects and device states are refreshed — no full re-scan is needed.
+
+**Configuring the timeout:**
+
+```cpp
+#define SLEEP_TIMEOUT_MS 60000   // sleep after 60 seconds of inactivity
+```
+
+Change the value to any number of milliseconds. To disable sleep entirely, set it to `0`:
+
+```cpp
+#define SLEEP_TIMEOUT_MS 0       // never sleep
+```
 
 ---
 
