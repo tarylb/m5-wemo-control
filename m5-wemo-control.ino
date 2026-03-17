@@ -41,6 +41,8 @@ const int STATIC_DEVICE_COUNT = sizeof(STATIC_DEVICES) / sizeof(STATIC_DEVICES[0
 #define SSDP_TIMEOUT_MS 5000
 #define LONG_PRESS_MS   1500
 
+#define SLEEP_TIMEOUT_MS 60000   // idle time before sleep (ms); 0 = never sleep
+
 #define WEMO_CONTROL_PATH "/upnp/control/basicevent1"
 #define WEMO_SERVICE_TYPE "urn:Belkin:service:basicevent:1"
 
@@ -60,6 +62,25 @@ int currentDevice = 0;
 unsigned long btnBPressTime = 0;
 bool          btnBLongHandled = false;
 
+// ── Sleep tracking ────────────────────────────────────────────────────────────
+unsigned long lastActivityTime = 0;
+
+// ── RTC memory (survives deep sleep) ─────────────────────────────────────────
+#define MAX_IP_LEN   16
+#define MAX_NAME_LEN 33
+
+struct RtcDevice {
+  char ip[MAX_IP_LEN];
+  int  port;
+  char name[MAX_NAME_LEN];
+  bool on;
+};
+
+RTC_DATA_ATTR RtcDevice rtcDevices[MAX_DEVICES];
+RTC_DATA_ATTR int       rtcDeviceCount   = 0;
+RTC_DATA_ATTR int       rtcCurrentDevice = 0;
+RTC_DATA_ATTR bool      rtcValid         = false;
+
 // ── Forward declarations ──────────────────────────────────────────────────────
 void     discoverWemo();
 void     addDevice(const String& ip, int port, const String& overrideName = "");
@@ -69,6 +90,8 @@ bool     getBinaryState(int idx);
 String   sendSoap(int idx, const String& action, const String& body);
 void     drawUI();
 void     showMessage(const String& msg, uint16_t color = TFT_WHITE);
+void     goToSleep();
+void     saveToRtc();
 
 // ─────────────────────────────────────────────────────────────────────────────
 void setup() {
@@ -94,8 +117,26 @@ void setup() {
     return;
   }
 
-  showMessage("Scanning for\nWeMo devices...");
-  discoverWemo();
+  bool wokeFromSleep = (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0);
+
+  if (wokeFromSleep && rtcValid) {
+    deviceCount   = rtcDeviceCount;
+    currentDevice = rtcCurrentDevice;
+    for (int i = 0; i < deviceCount; i++) {
+      devices[i].ip   = String(rtcDevices[i].ip);
+      devices[i].port = rtcDevices[i].port;
+      devices[i].name = String(rtcDevices[i].name);
+      devices[i].on   = rtcDevices[i].on;
+    }
+    showMessage("Refreshing...");
+    for (int i = 0; i < deviceCount; i++) getBinaryState(i);
+  } else {
+    showMessage("Scanning for\nWeMo devices...");
+    discoverWemo();
+    saveToRtc();
+  }
+
+  lastActivityTime = millis();
   drawUI();
 }
 
@@ -103,8 +144,14 @@ void setup() {
 void loop() {
   StickCP2.update();
 
+  // ── Idle sleep check ───────────────────────────────────────────────────────
+  if (SLEEP_TIMEOUT_MS > 0 && millis() - lastActivityTime >= SLEEP_TIMEOUT_MS) {
+    goToSleep();
+  }
+
   // ── Button A: toggle current device ────────────────────────────────────────
   if (StickCP2.BtnA.wasPressed()) {
+    lastActivityTime = millis();
     if (deviceCount == 0) {
       showMessage("No devices found.\nLong-press B\nto scan.", TFT_ORANGE);
       delay(2000);
@@ -124,6 +171,7 @@ void loop() {
 
   // ── Button B: short = cycle, long = rescan ──────────────────────────────────
   if (StickCP2.BtnB.wasPressed()) {
+    lastActivityTime = millis();
     btnBPressTime   = millis();
     btnBLongHandled = false;
   }
@@ -156,6 +204,37 @@ void loop() {
   }
 
   delay(50);
+}
+
+// ── Sleep ─────────────────────────────────────────────────────────────────────
+void saveToRtc() {
+  rtcDeviceCount   = deviceCount;
+  rtcCurrentDevice = currentDevice;
+  for (int i = 0; i < deviceCount; i++) {
+    strncpy(rtcDevices[i].ip,   devices[i].ip.c_str(),   MAX_IP_LEN - 1);
+    strncpy(rtcDevices[i].name, devices[i].name.c_str(), MAX_NAME_LEN - 1);
+    rtcDevices[i].ip[MAX_IP_LEN - 1]     = '\0';
+    rtcDevices[i].name[MAX_NAME_LEN - 1] = '\0';
+    rtcDevices[i].port = devices[i].port;
+    rtcDevices[i].on   = devices[i].on;
+  }
+  rtcValid = true;
+}
+
+void goToSleep() {
+  saveToRtc();
+  showMessage("Sleeping...", TFT_DARKGREY);
+  delay(500);
+
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+
+  StickCP2.Display.setBrightness(0);
+  StickCP2.Display.sleep();
+
+  // Wake on Button A (GPIO37) press — active low
+  esp_sleep_enable_ext0_wakeup(GPIO_NUM_37, 0);
+  esp_deep_sleep_start();
 }
 
 // ── Discovery ─────────────────────────────────────────────────────────────────
