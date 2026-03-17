@@ -26,11 +26,12 @@
 #include <HTTPClient.h>
 
 // Optional: hard-coded devices. Set count to 0 to use discovery only.
-// Format: { "IP", port }
-struct StaticDevice { const char* ip; int port; };
+// Format: { "IP", port }  or  { "IP", port, "Friendly Name" }
+// A non-null name skips the setup.xml fetch and uses that string directly.
+struct StaticDevice { const char* ip; int port; const char* name = nullptr; };
 const StaticDevice STATIC_DEVICES[] = {
   // { "192.168.1.42", 49153 },
-  // { "192.168.1.43", 49153 },
+  // { "192.168.1.43", 49153, "Living Room" },
 };
 const int STATIC_DEVICE_COUNT = sizeof(STATIC_DEVICES) / sizeof(STATIC_DEVICES[0]);
 // ─────────────────────────────────────────────────────────────────────────────
@@ -61,7 +62,7 @@ bool          btnBLongHandled = false;
 
 // ── Forward declarations ──────────────────────────────────────────────────────
 void     discoverWemo();
-void     addDevice(const String& ip, int port);
+void     addDevice(const String& ip, int port, const String& overrideName = "");
 String   fetchFriendlyName(const String& ip, int port, const String& locationPath);
 bool     setBinaryState(int idx, bool on);
 bool     getBinaryState(int idx);
@@ -160,7 +161,8 @@ void loop() {
 // ── Discovery ─────────────────────────────────────────────────────────────────
 void discoverWemo() {
   for (int i = 0; i < STATIC_DEVICE_COUNT && deviceCount < MAX_DEVICES; i++) {
-    addDevice(String(STATIC_DEVICES[i].ip), STATIC_DEVICES[i].port);
+    addDevice(String(STATIC_DEVICES[i].ip), STATIC_DEVICES[i].port,
+              STATIC_DEVICES[i].name ? String(STATIC_DEVICES[i].name) : "");
   }
 
   WiFiUDP udp;
@@ -231,7 +233,7 @@ void discoverWemo() {
         int idx = deviceCount++;
         devices[idx].ip   = ip;
         devices[idx].port = port;
-        devices[idx].name = fetchFriendlyName(ip, port, path);
+        devices[idx].name = fetchFriendlyName(ip, port, "/setup.xml");
         devices[idx].on   = false;
         getBinaryState(idx);
         showMessage("Found " + String(deviceCount) + " device(s)...");
@@ -243,14 +245,16 @@ void discoverWemo() {
   udp.stop();
 }
 
-void addDevice(const String& ip, int port) {
+void addDevice(const String& ip, int port, const String& overrideName) {
   for (int i = 0; i < deviceCount; i++) {
     if (devices[i].ip == ip && devices[i].port == port) return;
   }
   int idx = deviceCount++;
   devices[idx].ip   = ip;
   devices[idx].port = port;
-  devices[idx].name = fetchFriendlyName(ip, port, "/setup.xml");
+  devices[idx].name = overrideName.length() > 0
+                        ? overrideName
+                        : fetchFriendlyName(ip, port, "/setup.xml");
   devices[idx].on   = false;
   getBinaryState(idx);
 }
