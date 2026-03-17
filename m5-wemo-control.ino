@@ -64,7 +64,8 @@ unsigned long btnBPressTime = 0;
 bool          btnBLongHandled = false;
 
 // ── Sleep tracking ────────────────────────────────────────────────────────────
-unsigned long lastActivityTime = 0;
+unsigned long lastActivityTime   = 0;
+unsigned long lastBatteryUpdate  = 0;
 
 // ── Forward declarations ──────────────────────────────────────────────────────
 void     discoverWemo();
@@ -77,6 +78,7 @@ void     drawUI();
 void     showMessage(const String& msg, uint16_t color = TFT_WHITE);
 void     goToSleep();
 void     animateToggle(bool toOn);
+void     drawBattery();
 
 // ─────────────────────────────────────────────────────────────────────────────
 void setup() {
@@ -116,6 +118,12 @@ void loop() {
   // ── Idle sleep check ───────────────────────────────────────────────────────
   if (SLEEP_TIMEOUT_MS > 0 && millis() - lastActivityTime >= SLEEP_TIMEOUT_MS) {
     goToSleep();
+  }
+
+  // ── Periodic battery refresh ───────────────────────────────────────────────
+  if (millis() - lastBatteryUpdate >= 300000) {
+    drawBattery();
+    lastBatteryUpdate = millis();
   }
 
   // ── Button A: toggle current device ────────────────────────────────────────
@@ -492,6 +500,41 @@ void drawUI() {
     d.print("[A] Toggle [B] Next");
   } else {
     d.print("[A] Toggle [B-long] Scan");
+  }
+
+  drawBattery();
+  lastBatteryUpdate = millis();
+}
+
+void drawBattery() {
+  auto& d = StickCP2.Display;
+
+  int level = StickCP2.Power.getBatteryLevel(); // 0–100, or -1 if unknown
+
+  // Icon geometry (bottom-right corner, aligned with controls hint row)
+  const int bx = 213, by = 118;  // body top-left
+  const int bw = 22,  bh = 10;   // body size
+  const int nw = 3,   nh = 6;    // terminal nub size
+
+  // Clear the icon area
+  d.fillRect(bx, by, bw + nw, bh, TFT_BLACK);
+
+  if (level < 0) return; // battery state unknown — leave blank
+
+  uint16_t color = level >= 60 ? TFT_GREEN
+                 : level >= 20 ? TFT_YELLOW
+                 :               TFT_RED;
+
+  // Body outline
+  d.drawRect(bx, by, bw, bh, TFT_DARKGREY);
+
+  // Terminal nub (right side, centred vertically)
+  d.fillRect(bx + bw, by + (bh - nh) / 2, nw, nh, TFT_DARKGREY);
+
+  // Fill proportional to level
+  int fillW = max(0, (bw - 2) * level / 100);
+  if (fillW > 0) {
+    d.fillRect(bx + 1, by + 1, fillW, bh - 2, color);
   }
 }
 
