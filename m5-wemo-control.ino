@@ -92,6 +92,7 @@ void     drawUI();
 void     showMessage(const String& msg, uint16_t color = TFT_WHITE);
 void     goToSleep();
 void     saveToRtc();
+void     animateToggle(bool toOn);
 
 // ─────────────────────────────────────────────────────────────────────────────
 void setup() {
@@ -159,14 +160,14 @@ void loop() {
       return;
     }
     bool desired = !devices[currentDevice].on;
-    showMessage(desired ? "Turning ON..." : "Turning OFF...");
     if (setBinaryState(currentDevice, desired)) {
       devices[currentDevice].on = desired;
+      animateToggle(desired);
     } else {
       showMessage("Command failed!", TFT_RED);
       delay(2000);
+      drawUI();
     }
-    drawUI();
   }
 
   // ── Button B: short = cycle, long = rescan ──────────────────────────────────
@@ -207,6 +208,35 @@ void loop() {
 }
 
 // ── Sleep ─────────────────────────────────────────────────────────────────────
+void animateToggle(bool toOn) {
+  auto& d = StickCP2.Display;
+
+  const int cx    = d.width() / 2;
+  const int cy    = 86;
+  const int tw    = 80;
+  const int th    = 34;
+  const int tr    = 17;
+  const int thumR = 13;
+  const int tx    = cx - tw / 2;
+
+  int fromX = toOn ? (tx + 4 + thumR) : (tx + tw - 4 - thumR);
+  int toX   = toOn ? (tx + tw - 4 - thumR) : (tx + 4 + thumR);
+
+  const int steps   = 10;
+  const int frameMs = 18;
+
+  for (int s = 1; s <= steps; s++) {
+    int thumbX = fromX + (toX - fromX) * s / steps;
+    // colour switches at the midpoint of the travel
+    bool pastMid    = (s * 2 >= steps) == toOn;
+    uint16_t trackColor = pastMid ? TFT_GREEN : TFT_DARKGREY;
+
+    d.fillRoundRect(tx, cy - th / 2, tw, th, tr, trackColor);
+    d.fillCircle(thumbX, cy, thumR, TFT_WHITE);
+    delay(frameMs);
+  }
+}
+
 void saveToRtc() {
   rtcDeviceCount   = deviceCount;
   rtcCurrentDevice = currentDevice;
@@ -315,7 +345,7 @@ void discoverWemo() {
         devices[idx].name = fetchFriendlyName(ip, port, "/setup.xml");
         devices[idx].on   = false;
         getBinaryState(idx);
-        showMessage("Found " + String(deviceCount) + " device(s)...");
+        showMessage("Found " + String(deviceCount) + " device(s)");
       }
     }
     delay(10);
@@ -439,31 +469,39 @@ void drawUI() {
   d.setCursor(d.width() - 30, 8);
   d.printf("%d/%d", currentDevice + 1, deviceCount);
 
-  d.setTextSize(1);
+  d.setTextSize(2);
   d.setTextColor(TFT_WHITE);
   d.setCursor(4, 26);
   String name = dev.name;
-  if (name.length() > 26) name = name.substring(0, 25) + "~";
+  if (name.length() > 19) name = name.substring(0, 18) + "~";
   d.print(name);
 
+  d.setTextSize(1);
   d.setTextColor(TFT_DARKGREY);
-  d.setCursor(4, 38);
+  d.setCursor(4, 46);
   d.printf("%s:%d", dev.ip.c_str(), dev.port);
 
-  d.setTextSize(3);
-  if (dev.on) {
-    d.setTextColor(TFT_GREEN);
-    d.setCursor(30, 55);
-    d.print("  ON  ");
-  } else {
-    d.setTextColor(TFT_RED);
-    d.setCursor(30, 55);
-    d.print("  OFF ");
+  // Toggle icon centered at (d.width()/2, 86)
+  {
+    const int cx    = d.width() / 2;
+    const int cy    = 86;
+    const int tw    = 80;   // track width
+    const int th    = 34;   // track height
+    const int tr    = 17;   // track corner radius (th/2 = pill)
+    const int thumR = 13;   // thumb radius
+    const int tx    = cx - tw / 2;
+    const int ty    = cy - th / 2;
+
+    uint16_t trackColor = dev.on ? TFT_GREEN : TFT_DARKGREY;
+    int      thumbX     = dev.on ? (tx + tw - 4 - thumR) : (tx + 4 + thumR);
+
+    d.fillRoundRect(tx, ty, tw, th, tr, trackColor);
+    d.fillCircle(thumbX, cy, thumR, TFT_WHITE);
   }
 
   d.setTextSize(1);
   d.setTextColor(TFT_DARKGREY);
-  d.setCursor(4, 100);
+  d.setCursor(4, 118);
   if (deviceCount > 1) {
     d.print("[A] Toggle [B] Next");
   } else {
