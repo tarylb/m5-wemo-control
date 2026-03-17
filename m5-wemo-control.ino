@@ -9,6 +9,7 @@
  *   Button A (M5 front button)  - Toggle current outlet ON/OFF
  *   Button B short press        - Cycle to next WeMo device
  *   Button B long press (1.5s)  - Re-scan for WeMo devices
+ *   Button A                   - Wake from sleep
  *
  * Dependencies (install via Arduino Library Manager):
  *   - M5StickCPlus2  by M5Stack
@@ -65,22 +66,6 @@ bool          btnBLongHandled = false;
 // ── Sleep tracking ────────────────────────────────────────────────────────────
 unsigned long lastActivityTime = 0;
 
-// ── RTC memory (survives deep sleep) ─────────────────────────────────────────
-#define MAX_IP_LEN   16
-#define MAX_NAME_LEN 33
-
-struct RtcDevice {
-  char ip[MAX_IP_LEN];
-  int  port;
-  char name[MAX_NAME_LEN];
-  bool on;
-};
-
-RTC_DATA_ATTR RtcDevice rtcDevices[MAX_DEVICES];
-RTC_DATA_ATTR int       rtcDeviceCount   = 0;
-RTC_DATA_ATTR int       rtcCurrentDevice = 0;
-RTC_DATA_ATTR bool      rtcValid         = false;
-
 // ── Forward declarations ──────────────────────────────────────────────────────
 void     discoverWemo();
 void     addDevice(const String& ip, int port, const String& overrideName = "");
@@ -91,7 +76,6 @@ String   sendSoap(int idx, const String& action, const String& body);
 void     drawUI();
 void     showMessage(const String& msg, uint16_t color = TFT_WHITE);
 void     goToSleep();
-void     saveToRtc();
 void     animateToggle(bool toOn);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -118,24 +102,8 @@ void setup() {
     return;
   }
 
-  bool wokeFromSleep = (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0);
-
-  if (wokeFromSleep && rtcValid) {
-    deviceCount   = rtcDeviceCount;
-    currentDevice = rtcCurrentDevice;
-    for (int i = 0; i < deviceCount; i++) {
-      devices[i].ip   = String(rtcDevices[i].ip);
-      devices[i].port = rtcDevices[i].port;
-      devices[i].name = String(rtcDevices[i].name);
-      devices[i].on   = rtcDevices[i].on;
-    }
-    showMessage("Refreshing...");
-    for (int i = 0; i < deviceCount; i++) getBinaryState(i);
-  } else {
-    showMessage("Scanning for\nWeMo devices...");
-    discoverWemo();
-    saveToRtc();
-  }
+  showMessage("Scanning for\nWeMo devices...");
+  discoverWemo();
 
   lastActivityTime = millis();
   drawUI();
@@ -237,22 +205,7 @@ void animateToggle(bool toOn) {
   }
 }
 
-void saveToRtc() {
-  rtcDeviceCount   = deviceCount;
-  rtcCurrentDevice = currentDevice;
-  for (int i = 0; i < deviceCount; i++) {
-    strncpy(rtcDevices[i].ip,   devices[i].ip.c_str(),   MAX_IP_LEN - 1);
-    strncpy(rtcDevices[i].name, devices[i].name.c_str(), MAX_NAME_LEN - 1);
-    rtcDevices[i].ip[MAX_IP_LEN - 1]     = '\0';
-    rtcDevices[i].name[MAX_NAME_LEN - 1] = '\0';
-    rtcDevices[i].port = devices[i].port;
-    rtcDevices[i].on   = devices[i].on;
-  }
-  rtcValid = true;
-}
-
 void goToSleep() {
-  saveToRtc();
   showMessage("Sleeping...", TFT_DARKGREY);
   delay(500);
 
@@ -262,9 +215,42 @@ void goToSleep() {
   StickCP2.Display.setBrightness(0);
   StickCP2.Display.sleep();
 
-  // Wake on Button A (GPIO37) press — active low
-  esp_sleep_enable_ext0_wakeup(GPIO_NUM_37, 0);
-  esp_deep_sleep_start();
+  // Soft sleep: throttle CPU and poll for Button A.
+  // Avoids PMIC deep-sleep issues that prevent wakeup on battery.
+  setCpuFrequencyMhz(10);
+  while (true) {
+    StickCP2.update();
+    if (StickCP2.BtnA.wasPressed()) break;
+    delay(100);
+  }
+
+  // Flush button state so the wakeup press isn't seen as a toggle in loop()
+  delay(50);
+  StickCP2.update();
+
+  // Wake up
+  setCpuFrequencyMhz(240);
+  StickCP2.Display.wakeup();
+  StickCP2.Display.setBrightness(100);
+
+  showMessage("Reconnecting...");
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  unsigned long t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) {
+    delay(500);
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    showMessage("WiFi failed!", TFT_RED);
+    delay(3000);
+  } else {
+    showMessage("Refreshing...");
+    for (int i = 0; i < deviceCount; i++) getBinaryState(i);
+  }
+
+  lastActivityTime = millis();
+  drawUI();
 }
 
 // ── Discovery ─────────────────────────────────────────────────────────────────

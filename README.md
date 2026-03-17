@@ -71,7 +71,7 @@ Leave the array empty to rely entirely on auto-discovery (the default).
 
 ## Sleep After Inactivity
 
-The device enters deep sleep automatically after a configurable period of inactivity to save battery. Press **Button A** to wake it. On wake, WiFi reconnects and device states are refreshed — no full re-scan is needed.
+The device enters sleep automatically after a configurable period of inactivity to save battery. Press **Button A** to wake it. On wake, WiFi reconnects and device states are refreshed — no full re-scan is needed.
 
 **Configuring the timeout:**
 
@@ -94,6 +94,7 @@ Change the value to any number of milliseconds. To disable sleep entirely, set i
 | **Button A** (front) | Toggle current outlet ON / OFF |
 | **Button B** short press | Cycle to next WeMo device |
 | **Button B** long press (1.5 s) | Re-scan for WeMo devices |
+| **Button A** | Wake from sleep |
 
 ---
 
